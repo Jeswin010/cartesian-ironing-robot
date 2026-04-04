@@ -12,6 +12,9 @@ A fully functional autonomous ironing robot built on a Cartesian (3-axis) frame.
 This repository contains the complete vision pipeline: from raw image capture through garment segmentation, contour detection, coordinate conversion, and ironing path generation.
 
 ---
+## Demo
+
+https://github.com/Jeswin010/cartesian-ironing-robot/blob/main/robot_demo.mp4
 
 ## System Architecture
 

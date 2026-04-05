@@ -23,7 +23,7 @@
 
 ## Overview
 
-A fully functional autonomous ironing robot built on a Cartesian (3-axis) frame.
+A fully functional autonomous ironing robot built on a Cartesian (2-axis) frame.
 The robot captures a live image of the garment, segments it from the background,
 generates a full-coverage ironing path, and drives the end-effector — combining
 a steam iron and vacuum suction — across the cloth surface automatically.

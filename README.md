@@ -5,44 +5,56 @@
 
 ---
 
-## Overview
-
-A fully functional autonomous ironing robot built on a Cartesian (3-axis) frame. The robot uses a camera mounted above the ironing surface to detect a garment, generate a coverage path, and drive the end-effector — which combines a steam iron and vacuum suction — across the entire cloth surface automatically.
-
-This repository contains the complete vision pipeline: from raw image capture through garment segmentation, contour detection, coordinate conversion, and ironing path generation.
-
----
 ## Demo
 
-https://github.com/Jeswin010/cartesian-ironing-robot/blob/main/robot_demo.mp4
-The demo video shows an early hardware test. The current codebase reflects the complete 
-pipeline.
+**Hardware demo:**
+[▶ Watch robot_demo.mp4](https://github.com/Jeswin010/cartesian-ironing-robot/blob/main/robot_demo.mp4)
+
+**End-effector path simulation:**
+
+![Ironing path simulation](simulation.gif)
+
+> The demo video shows an early hardware test. The current codebase implements
+> the complete pipeline — live webcam capture, GrabCut segmentation,
+> pixel-to-real-world coordinate conversion, boustrophedon path generation,
+> and full serial communication to Arduino.
+
+---
+
+## Overview
+
+A fully functional autonomous ironing robot built on a Cartesian (3-axis) frame.
+The robot captures a live image of the garment, segments it from the background,
+generates a full-coverage ironing path, and drives the end-effector — combining
+a steam iron and vacuum suction — across the cloth surface automatically.
+
+---
 
 ## System Architecture
 
 ```
-Camera Input
-     │
-     ▼
+Webcam (live capture, press SPACE)
+        │
+        ▼
 Undistortion (calibrated intrinsics)
-     │
-     ▼
+        │
+        ▼
 GrabCut Segmentation  ──►  Garment Mask
-     │
-     ▼
+        │
+        ▼
 Canny Edge Detection + Contour Extraction
-     │
-     ▼
+        │
+        ▼
 Douglas-Peucker Simplification
-     │
-     ▼
-Pinhole Model → Real-World Coordinates (mm)
-     │
-     ▼
+        │
+        ▼
+Pinhole Model → Real-World Coordinates (mm) → Stepper Steps
+        │
+        ▼
 Boustrophedon Path Generation
-     │
-     ▼
-Waypoints → Arduino (Serial) → Stepper Motors
+        │
+        ▼
+Serial (115200 baud) → Arduino → Stepper Motors + Steam + Vacuum
 ```
 
 ---
@@ -56,36 +68,55 @@ Waypoints → Arduino (Serial) → Stepper Motors
 | Driver | DRV8825 on CNC Shield (Arduino Uno) |
 | End-effector | Steam iron head + vacuum suction cup |
 | Camera | USB webcam (calibrated, mounted overhead) |
-| Controller | Arduino Uno + Python (serial communication) |
+| Hanger servo | MG996R — rotates garment for side 2 |
+| Controller | Arduino Uno + Python via serial @ 115200 baud |
 
 ---
 
 ## Vision Pipeline
 
-### 1. Garment Segmentation — GrabCut
-Rather than simple colour thresholding, GrabCut models the colour distribution of both foreground (garment) and background using Gaussian Mixture Models, then finds the optimal boundary via graph-cut. This handles white shirts on white backgrounds where HSV thresholding fails.
+### 1. Live Capture + Undistortion
+Webcam opens in a preview window — press SPACE to capture the garment image.
+Lens distortion is corrected using calibrated intrinsics before processing.
 
-### 2. Contour Detection — Canny + Filters
-Canny edge detection is applied on the segmentation mask (not the raw image), isolating only the garment boundary. Contours are filtered by:
-- Area > 10% of image
-- Width and height > 20% of image dimensions
-- Aspect ratio between 0.3 and 3.0 (rejects hanger rods automatically)
+### 2. GrabCut Segmentation
+GrabCut models foreground (garment) and background colour distributions using
+Gaussian Mixture Models, finding the optimal boundary via graph-cut.
+Works on white shirts against white backdrops where HSV thresholding fails.
 
-### 3. Boundary Simplification — Douglas-Peucker
-`cv2.approxPolyDP` reduces contour point density while preserving boundary shape, as described in the paper.
+### 3. Contour Detection — Canny + Filters
+Canny edge detection on the segmentation mask isolates only the garment boundary.
+Contours filtered by area (>10%), dimensions (>20% width/height), and
+aspect ratio (0.3–3.0) — automatically rejects hanger rods.
+Douglas-Peucker simplification reduces point density while preserving shape.
 
 ### 4. Coordinate Conversion — Pinhole Model
 ```
-X_mm = (u - cx) × Z / fx
-Y_mm = (v - cy) × Z / fy
+X_mm = (u - cx) × Z / fx      fx=569.75, cx=339.38
+Y_mm = (v - cy) × Z / fy      fy=568.89, cy=215.55, Z=750mm
 ```
-Camera height Z = 750 mm. Calibrated intrinsics: fx=569.75, fy=568.89, cx=339.38, cy=215.55.
+Steps = mm × 20 (800 steps/rev ÷ 40mm/rev lead screw).
 
 ### 5. Path Generation — Boustrophedon
 - Start: bottom-right of garment mask
-- Even columns: reposition upward (ironing OFF)
-- Odd columns: iron downward (steam + vacuum ON)
-- Strip spacing derived from physical end-effector width (30 mm)
+- Even columns: reposition upward (ironing OFF, fast move)
+- Odd columns: iron downward (steam + vacuum ON, slow move)
+- Strip spacing = end-effector physical width (30mm → ~23px at Z=750mm)
+
+---
+
+## Serial Protocol (Python → Arduino)
+
+| Command | Action |
+|---|---|
+| `MOVE X<mm> Y<mm> F<feed>` | Move end-effector to absolute position |
+| `STEAM_ON` / `STEAM_OFF` | Activate/deactivate steam relay |
+| `VACUUM_ON` / `VACUUM_OFF` | Activate/deactivate vacuum relay |
+| `SERVO_ROTATE` | Rotate hanger 180° for side 2 |
+| `HOME` | Return to origin |
+
+Handshake protocol: Arduino replies `OK` after each command before Python sends the next.
+This prevents buffer overflow and guarantees command ordering.
 
 ---
 
@@ -93,13 +124,12 @@ Camera height Z = 750 mm. Calibrated intrinsics: fx=569.75, fy=568.89, cx=339.38
 
 ```
 cartesian-ironing-robot/
-├── ironing_pipeline.py      # Main vision + path planning pipeline
-├── calibration_data.npz     # Camera calibration matrices
-├── paper/
-│   └── ICAIT2025_paper.pdf  # Published conference paper
-├── media/
-│   ├── robot_setup.jpg      # Physical robot photograph
-│   └── simulation.gif       # End-effector path animation
+├── ironing_pipeline.py      # Vision + path planning + serial pipeline (Python)
+├── arduino_controller.ino   # Arduino sketch — stepper, relay, servo control
+├── icait2025_paper.pdf      # Published conference paper
+├── simulation.gif           # End-effector path animation
+├── robot_demo.mp4           # Hardware demonstration
+├── robot_setup.jpg          # Physical robot photograph
 └── README.md
 ```
 
@@ -107,61 +137,50 @@ cartesian-ironing-robot/
 
 ## Requirements
 
-```
-Python >= 3.8
-opencv-python
-numpy
-matplotlib
-pyserial          # for Arduino communication (next iteration)
-```
-
-Install with:
 ```bash
 pip install opencv-python numpy matplotlib pyserial
 ```
+
+Python >= 3.8
 
 ---
 
 ## Usage
 
 ```bash
-# Run with default image path (edit IMAGE_PATH in script)
+# Webcam capture (live — press SPACE to capture)
 python ironing_pipeline.py
 
-# Or pass image path as argument
+# Offline testing with an image file
 python ironing_pipeline.py --image "path/to/shirt.jpg"
+
+# Execute on hardware via serial
+python ironing_pipeline.py --run
+```
+
+To enable hardware execution, set in `ironing_pipeline.py`:
+```python
+SERIAL_ENABLED = True
+SERIAL_PORT    = "COM3"   # your Arduino port
 ```
 
 **Output:**
-- 4-panel static visualisation saved as `pipeline_output.png`
-- Animated end-effector simulation (live window)
-- Waypoint coordinates printed to terminal
-
----
-
-## Results
-
-The pipeline successfully:
-- Segments garments from plain and near-white backgrounds
-- Generates complete coverage paths adapting to garment shape
-- Converts pixel coordinates to real-world mm using calibrated camera model
-- Produces waypoints ready for serial transmission to Arduino
-
-*Serial communication to Arduino and physical robot integration code to be added in the next commit.*
+- 4-panel pipeline visualisation saved as `pipeline_output.png`
+- Animated end-effector simulation (or live hardware execution with `--run`)
+- Waypoint table printed to terminal: pixel → mm → stepper steps
 
 ---
 
 ## Paper
 
-If you use or reference this work:
-
-> [Your Name(s)], "Design and Implementation of a Cartesian-Based Automatic Ironing Robot Using Vision-Guided Steam and Vacuum End-Effector", *Proceedings of ICAIT 2025*.
+> Jeswin Devasia et al., "Design and Implementation of a Cartesian-Based Automatic
+> Ironing Robot Using Vision-Guided Steam and Vacuum End-Effector",
+> *Proceedings of ICAIT 2025.*
 
 ---
 
 ## Author
 
-**[Your Full Name]**  
-B.Tech — [Your Department], [Your College Name]  
-[Your LinkedIn URL]  
-[Your Email]
+**Jeswin Devasia**
+B.Tech — [Your Department], [Your College]
+[LinkedIn](https://www.linkedin.com/in/jeswin-devasia-)

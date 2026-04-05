@@ -15,6 +15,8 @@ This repository contains the complete vision pipeline: from raw image capture th
 ## Demo
 
 https://github.com/Jeswin010/cartesian-ironing-robot/blob/main/robot_demo.mp4
+The demo video shows an early hardware test. The current codebase reflects the complete 
+pipeline.
 
 ## System Architecture
 

@@ -182,5 +182,5 @@ SERIAL_PORT    = "COM3"   # your Arduino port
 ## Author
 
 **Jeswin Devasia**
-B.Tech — [Your Department], [Your College]
-[LinkedIn](https://www.linkedin.com/in/jeswin-devasia-)
+B.Tech — [Mechatronics]
+
